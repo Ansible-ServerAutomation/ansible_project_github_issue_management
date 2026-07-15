@@ -1,0 +1,224 @@
+---
+- name: Validate common required inputs
+  ansible.builtin.assert:
+    that:
+      - github_repo_owner | length > 0
+      - github_repo_name | length > 0
+      - github_token | length > 0
+      - issue_category in ['REGEX_UPDATE', 'NEW_AUTOMATION']
+      - alert_description | length > 0
+      - alert_key | length > 0
+    fail_msg: >-
+      Missing required input. Ensure github_repo_owner, github_repo_name, github_token,
+      issue_category (REGEX_UPDATE or NEW_AUTOMATION), alert_description, and alert_key are set.
+
+- name: Validate REGEX_UPDATE specific inputs
+  ansible.builtin.assert:
+    that:
+      - suggested_regex | length > 0
+      - reasoning | length > 0
+      - confidence_score | string | length > 0
+    fail_msg: >-
+      REGEX_UPDATE requires suggested_regex, reasoning, and confidence_score.
+  when: issue_category == 'REGEX_UPDATE'
+
+- name: Validate NEW_AUTOMATION specific inputs
+  ansible.builtin.assert:
+    that:
+      - development_approach | length > 0
+      - automation_type in ['Diagnostics', 'Remediation']
+    fail_msg: >-
+      NEW_AUTOMATION requires development_approach and automation_type
+      (Diagnostics or Remediation).
+  when: issue_category == 'NEW_AUTOMATION'
+
+- name: Mask sensitive values from inputs
+  ansible.builtin.set_fact:
+    alert_description_masked: >-
+      {{ alert_description
+      | regex_replace(mask_ip_pattern, '[MASKED_IP]')
+      | regex_replace(mask_hostname_pattern, '[MASKED_HOSTNAME]') }}
+    alert_key_masked: >-
+      {{ alert_key
+      | regex_replace(mask_ip_pattern, '[MASKED_IP]')
+      | regex_replace(mask_hostname_pattern, '[MASKED_HOSTNAME]') }}
+    suggested_regex_masked: >-
+      {{ suggested_regex
+      | regex_replace(mask_ip_pattern, '[MASKED_IP]')
+      | regex_replace(mask_hostname_pattern, '[MASKED_HOSTNAME]') }}
+    reasoning_masked: >-
+      {{ reasoning
+      | regex_replace(mask_ip_pattern, '[MASKED_IP]')
+      | regex_replace(mask_hostname_pattern, '[MASKED_HOSTNAME]') }}
+    development_approach_masked: >-
+      {{ development_approach
+      | regex_replace(mask_ip_pattern, '[MASKED_IP]')
+      | regex_replace(mask_hostname_pattern, '[MASKED_HOSTNAME]') }}
+
+- name: Fetch all open issues from GitHub
+  ansible.builtin.uri:
+    url: >-
+      https://api.github.com/repos/{{ github_repo_owner }}/{{ github_repo_name }}/issues?state=open&per_page=100
+    method: GET
+    headers:
+      Authorization: "Bearer {{ github_token }}"
+      Accept: "application/vnd.github+json"
+      X-GitHub-Api-Version: "2022-11-28"
+    return_content: true
+    status_code: 200
+  register: gh_open_issues_response
+  no_log: true
+
+- name: Fetch all closed issues from GitHub
+  ansible.builtin.uri:
+    url: >-
+      https://api.github.com/repos/{{ github_repo_owner }}/{{ github_repo_name }}/issues?state=closed&per_page=100
+    method: GET
+    headers:
+      Authorization: "Bearer {{ github_token }}"
+      Accept: "application/vnd.github+json"
+      X-GitHub-Api-Version: "2022-11-28"
+    return_content: true
+    status_code: 200
+  register: gh_closed_issues_response
+  no_log: true
+
+- name: Merge open and closed issue lists
+  ansible.builtin.set_fact:
+    all_repo_issues: "{{ (gh_open_issues_response.json | default([])) + (gh_closed_issues_response.json | default([])) }}"
+
+- name: Initialize duplicate issue collection
+  ansible.builtin.set_fact:
+    matching_issues: []
+
+- name: Find issues with same Alert Description and Alert Key
+  ansible.builtin.set_fact:
+    matching_issues: "{{ matching_issues + [issue_details] }}"
+  vars:
+    issue_text: "{{ ((item.title | default('')) ~ '\n' ~ (item.body | default(''))) | lower }}"
+    issue_details:
+      number: "{{ item.number }}"
+      title: "{{ item.title }}"
+      state: "{{ item.state }}"
+      html_url: "{{ item.html_url }}"
+      created_at: "{{ item.created_at }}"
+      updated_at: "{{ item.updated_at }}"
+      closed_at: "{{ item.closed_at | default('') }}"
+      labels: "{{ item.labels | default([]) | map(attribute='name') | list }}"
+      body: "{{ item.body | default('') }}"
+  loop: "{{ all_repo_issues }}"
+  loop_control:
+    label: "{{ item.number | default('unknown') }}"
+  when:
+    - item.pull_request is not defined
+    - (alert_description_masked | lower) in issue_text
+    - (alert_key_masked | lower) in issue_text
+
+- name: Record issue lookup summary
+  ansible.builtin.set_fact:
+    issue_lookup_summary:
+      open_issue_count: "{{ gh_open_issues_response.json | default([]) | length }}"
+      closed_issue_count: "{{ gh_closed_issues_response.json | default([]) | length }}"
+      duplicate_issue_count: "{{ matching_issues | length }}"
+      duplicate_issues: "{{ matching_issues }}"
+
+- name: Print duplicate issue details when found
+  ansible.builtin.debug:
+    msg:
+      status: "duplicate_issue_found"
+      details: "{{ issue_lookup_summary }}"
+  when: matching_issues | length > 0
+
+- name: Build issue content for REGEX_UPDATE
+  ansible.builtin.set_fact:
+    issue_title: "[REGEX_UPDATE] {{ alert_key_masked }}"
+    issue_body: |
+      ## Issue Type
+      REGEX_UPDATE
+
+      ## Alert Metadata
+      - Alert Description: {{ alert_description_masked }}
+      - Alert Key: {{ alert_key_masked }}
+
+      ## Proposed Regex
+      {{ suggested_regex_masked }}
+
+      ## Reasoning
+      {{ reasoning_masked }}
+
+      ## Confidence Score
+      {{ confidence_score }}
+  when: issue_category == 'REGEX_UPDATE'
+
+- name: Build issue content for NEW_AUTOMATION
+  ansible.builtin.set_fact:
+    issue_title: "[NEW_AUTOMATION] {{ alert_key_masked }}"
+    issue_body: |
+      ## Issue Type
+      NEW_AUTOMATION
+
+      ## Alert Metadata
+      - Alert Description: {{ alert_description_masked }}
+      - Alert Key: {{ alert_key_masked }}
+
+      ## Development Approach
+      {{ development_approach_masked }}
+
+      ## Automation Type
+      {{ automation_type }}
+  when: issue_category == 'NEW_AUTOMATION'
+
+- name: Skip issue creation when duplicate exists
+  ansible.builtin.set_fact:
+    github_issue_result:
+      status: "skipped_duplicate"
+      details: "{{ issue_lookup_summary }}"
+  when: matching_issues | length > 0
+
+- name: Skip issue creation when prevent_issue_creation is enabled
+  ansible.builtin.set_fact:
+    github_issue_result:
+      status: "skipped_prevent_issue_creation"
+      details: "{{ issue_lookup_summary }}"
+  when:
+    - matching_issues | length == 0
+    - prevent_issue_creation | bool
+
+- name: Create GitHub issue when no duplicates exist
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/{{ github_repo_owner }}/{{ github_repo_name }}/issues"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ github_token }}"
+      Accept: "application/vnd.github+json"
+      X-GitHub-Api-Version: "2022-11-28"
+    body_format: json
+    body:
+      title: "{{ issue_title }}"
+      body: "{{ issue_body }}"
+      labels:
+        - "{{ issue_category }}"
+    status_code: 201
+    return_content: true
+  register: gh_create_issue_response
+  when:
+    - matching_issues | length == 0
+    - not (prevent_issue_creation | bool)
+  no_log: true
+
+- name: Capture creation result
+  ansible.builtin.set_fact:
+    github_issue_result:
+      status: "created"
+      number: "{{ gh_create_issue_response.json.number }}"
+      title: "{{ gh_create_issue_response.json.title }}"
+      html_url: "{{ gh_create_issue_response.json.html_url }}"
+      state: "{{ gh_create_issue_response.json.state }}"
+      details: "{{ issue_lookup_summary }}"
+  when:
+    - matching_issues | length == 0
+    - not (prevent_issue_creation | bool)
+
+- name: Return final role output
+  ansible.builtin.debug:
+    var: github_issue_result

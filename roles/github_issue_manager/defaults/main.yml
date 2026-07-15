@@ -1,0 +1,28 @@
+---
+# GitHub repository details
+github_repo_owner: ""
+github_repo_name: ""
+github_token: "{{ lookup('env', 'GITHUB_TOKEN') | default('', true) }}"
+
+# Supported values: REGEX_UPDATE, NEW_AUTOMATION
+issue_category: ""
+
+# Common inputs
+alert_description: ""
+alert_key: ""
+
+# REGEX_UPDATE inputs
+suggested_regex: ""
+reasoning: ""
+confidence_score: ""
+
+# NEW_AUTOMATION inputs
+development_approach: ""
+automation_type: ""
+
+# Masking patterns
+mask_ip_pattern: '(?<![0-9])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![0-9])'
+mask_hostname_pattern: '(?i)\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b'
+
+# Set to true to avoid creating issues even when no duplicate exists (dry-run style)
+prevent_issue_creation: false

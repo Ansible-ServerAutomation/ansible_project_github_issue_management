@@ -1,0 +1,11 @@
+---
+github_repo_owner: "Ansible-ServerAutomation"
+github_repo_name: "ansible_project_github_issue_management"
+github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"
+
+issue_category: "REGEX_UPDATE"
+alert_description: "Disk usage alert from server app01.example.com (10.1.2.3) exceeded threshold"
+alert_key: "disk_usage_high"
+suggested_regex: "^disk\\s+usage\\s+.*exceeded\\s+threshold$"
+reasoning: "Pattern isolates disk saturation alert text while excluding unrelated warnings for host app01.example.com"
+confidence_score: "0.91"

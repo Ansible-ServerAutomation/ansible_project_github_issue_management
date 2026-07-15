@@ -1,0 +1,16 @@
+---
+- name: GitHub Issue Management
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  tasks:
+    - name: Execute role for REGEX_UPDATE flow
+      ansible.builtin.include_role:
+        name: github_issue_manager
+      when: issue_category == 'REGEX_UPDATE'
+
+    - name: Execute role for NEW_AUTOMATION flow
+      ansible.builtin.include_role:
+        name: github_issue_manager
+      when: issue_category == 'NEW_AUTOMATION'

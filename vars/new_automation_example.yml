@@ -1,0 +1,10 @@
+---
+github_repo_owner: "Ansible-ServerAutomation"
+github_repo_name: "ansible_project_github_issue_management"
+github_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"
+
+issue_category: "NEW_AUTOMATION"
+alert_description: "CPU saturation alert for node db01.internal.local (192.168.1.10)"
+alert_key: "cpu_saturation"
+development_approach: "Build an Ansible role that validates process saturation, captures diagnostics, and optionally performs safe restart steps."
+automation_type: "Diagnostics"
